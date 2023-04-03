@@ -1,44 +1,99 @@
+from time import sleep
+
 import telebot
-from telebot import apihelper  # Нужно для работы Proxy
-import urllib.request  # request нужен для загрузки файлов от пользователя
+import datetime
+import asyncio
+#  import urllib.request  # request нужен для загрузки файлов от пользователя
+import sqlite3
+from multiprocessing import Process
+
+con = sqlite3.connect("res/db/userdata.db")
+cur = con.cursor()
+
+# con.commit()
+
 
 token = "6203295649:AAGtOD-fl1vXhUGqxIqcp5xbkFjQ35TyGi0"
 bot = telebot.TeleBot(token)
 
 HELP_TEXT = '''
-tg bot
-бот на каждый день в установленное пользователем время бот пишет доброе утро и отправляет погоду на сегодня и 2 анекдота и какие сегодня праздники
-вечером бот в установленное время бот предлагает отправить пользователю 3 фотографии дня что бы сохранить их
-по желанию бот формирует журнал воспоминаний
+Напиши /settime, а затем время по МСК без : . / и т.д. (например, 1700), чтобы выбрать время для напоминания вечером, когда ты будешь скидывать краткое описание своего дня и до 3х фотографий.
+Получить свой архив воспоминаний можно командой /getmagazine
+Написав /??? выбери время для получения с утра парочки анекдотов.
+
 '''
 
 example_magazine = {"userId1": [["day1text", "day1photo1", "day1photo2", "day1photo3"], ["day2text", "day2photo1", "day2photo2", "day2photo3"]], "userId2": ["messageId1", "messageId2"]}
 "userId1:day1Text/day1photo1/day1Photo2*day2Text/day2photo1;userId2"
 
-@bot.message_handler(content_types=["text"])
-def text(message):
-    if message.text == 'hello':
-        bot.send_message(message.chat.id, 'И тебе hello')
+
+def check_time_to_send():
+    time_list = [i[0] for i in sqlite3.connect("res/db/userdata.db").cursor().execute('SELECT time from time').fetchall()]
+    while True:
+        current_time = datetime.datetime.now().strftime('%H%M')
+        if int(current_time) in time_list:
+            curr_users = sqlite3.connect("res/db/userdata.db").cursor().execute(f'SELECT user from time WHERE time = "{current_time}"').fetchall()[0][0].split("/").pop(-1)
+            for userid in curr_users:
+                bot.send_message(userid, "Пора поделиться фотографиями за сегодня!")
+        sleep(60)
+        check_time_to_send()
 
 
-@bot.message_handler(content_types=["text"])
-def text(message):
-    if message.text == 'photo':
-        file = open('photo.png', 'rb')
-        bot.send_photo(message.chat.id, file)
+# _______________________________________________________ВРЕМЯ__________________________________________________________
+is_wait_time = False
 
 
-@bot.message_handler(content_types=["text"])
-def text(message):
-    if message.text == 'document':
-        file = open('file.txt', 'rb')
-        bot.send_document(message.chat.id, file)
+def change_wait_time():
+    global is_wait_time
+    is_wait_time = False
 
 
+def check_time(time, userid):
+    if len(time) == 4 and time.isdigit():
+        set_time(time, userid)
+    else:
+        bot.send_message(userid, "Время не было установлено. Напишите /settime снова и введите 4 цифры без других смволов.")
+
+
+def set_time(time, userid):
+    con = sqlite3.connect("res/db/userdata.db")
+    cur = con.cursor()
+
+    old_time = cur.execute(f'SELECT time FROM time WHERE user LIKE "%{userid}%"').fetchall()[0][0] if len(
+        cur.execute(f'SELECT time FROM time WHERE user LIKE "%{userid}%"').fetchall()) != 0 else -1  # Прошлое время юзера, если новый юзер то -1
+    users_in_new_time = cur.execute(f'SELECT user FROM time WHERE time = "{time}"').fetchall()[0][0] if len(
+        cur.execute(f'SELECT user FROM time WHERE time = "{time}"').fetchall()) != 0 else ""  # Строка с пользователями для НОВОГО времени, если время ещё не исполь. то ""
+    users_in_old_time = cur.execute(f'SELECT user FROM time WHERE time = "{old_time}"').fetchall()[0][0] if len(cur.execute(
+            f'SELECT user FROM time WHERE time = "{old_time}"').fetchall()) != 0 else ""  # Строка с пользователями для СТАРОГО времени, если время ещё не исполь. то "" (такое возможно?)
+
+    changeReq1 = f'UPDATE time SET time = "{time}", user = "{users_in_new_time + str(userid) + "/"}" WHERE time = "{time} time" AND user = "{users_in_new_time}";'  # Добавляем привязку к времени
+    changeReq2 = f'UPDATE time SET time = "{old_time}", user = "{users_in_old_time.replace(str(userid) + "/", "")}" WHERE time = "{old_time}" AND user = "{users_in_old_time}";'  # Отвязываем юзера от прошлого времени
+    print("!_!_!  ", changeReq2)
+    createReq = f'INSERT INTO time (time, user) VALUES ("{time}", "{str(userid) + "/"}");'
+    # deleteReq = f'UPDATE time SET time = "{old_time}", user = "{users_in_new_time + userid + "/"}" WHERE time = "{old_time} time" AND user = "{users_in_new_time}";'
+
+
+    if old_time == -1:  # Если новый пользователь
+        if len(users_in_new_time) == 0:  # Если время не существует
+            cur.execute(createReq)  # добавляем время и юзера
+        else:  # Новый пользователь, но время уже успользуется -> добавляем ко времени нового юзера
+            cur.execute(changeReq1)  # добавляем юзера к времени
+    else:  # Юзер уже превязан к времени. -> Удаляем привязку к старому и добавляем новую.
+        cur.execute(changeReq2)
+        if len(users_in_new_time) == 0:  # Если время не существует
+            cur.execute(createReq)  # добавляем время и юзера
+        else:  # Время уже успользуется -> добавляем ко времени юзера
+            cur.execute(changeReq1)  # добавляем юзера к времени
+
+    con.commit()
+# ______________________________________________________________________________________________________________________
+
+
+# _______________________________________________________КОМАНДЫ________________________________________________________
 
 @bot.message_handler(commands=['start'])
 def welcome_start(message):
-    bot.send_message(message.chat.id, 'Привет, я готов к работе. Информацию можно получить, написав мне /help')
+    bot.send_message(message.chat.id, 'Привет, я могу составить архив твоих воспоминаний! Как мной пользоваться можно узнать, написав мне /help')
 
 
 @bot.message_handler(commands=['help'])
@@ -48,15 +103,60 @@ def welcome_help(message):
 
 @bot.message_handler(commands=['settime'])
 def welcome_help(message):
-    bot.send_message(message.chat.id, '...')
+    global is_wait_time
+    bot.send_message(message.chat.id, 'Введите время в которое вам будет удобно получать уведомление так "1720"'
+                                      ' для получения в 17:20. Для отмены напишите -1 или отмена.')
+    is_wait_time = True
 
 
 @bot.message_handler(commands=['getmagazine'])
 def welcome_help(message):
     bot.send_message(message.chat.id, '...')
 
+# ______________________________________________________________________________________________________________________
 
-bot.polling()
+
+# _______________________________________________________ОБРАБОТКА ТЕКСТА_______________________________________________
+@bot.message_handler(content_types=["text"])
+def text(message):
+    if is_wait_time:  # ожидается установка времени
+        check_time(message.text, message.from_user.id)
+        change_wait_time()
+    elif message.text == "id":
+        bot.send_message(message.chat.id, "chat id is " + str(message.chat.id))
+    elif message.text == "??":
+        bot.send_message(message.from_user.id, "user id is " + str(message.from_user.id))
+
+
+# @bot.message_handler(content_types=["text"])
+# def text(message):
+#     if message.text == 'photo':
+#         file = open('photo.png', 'rb')
+#         bot.send_photo(message.chat.id, file)
+#
+#
+# @bot.message_handler(content_types=["text"])
+# def text(message):
+#     if message.text == 'document':
+#         file = open('file.txt', 'rb')
+#         bot.send_document(message.chat.id, file)
+
+# ______________________________________________________________________________________________________________________
+
+
+def run_bot():
+    bot.polling()
+
+
+if __name__ == "__main__":
+    Process(target=run_bot).start()
+    Process(target=check_time_to_send).start()
+
+
+
+# con.close()
+print()
+
 
 
 
@@ -72,9 +172,7 @@ bot.polling()
 #
 #
 # async def start(update, context):
-#     await update.message.reply_html(
-#         rf"Welcome to our clothing store bot.",
-#     )
+#     await update.message.reply_html (rf"Welcome to our clothing store bot.", )
 #
 #
 # async def help(update, context):
