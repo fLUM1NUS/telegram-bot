@@ -5,6 +5,16 @@ import sqlite3
 import openai
 from time import sleep
 from multiprocessing import Process
+
+# from PIL import Image
+
+import cv2
+import numpy as np
+import random
+import rpack
+from fractions import Fraction
+from math import prod
+import colorgram
 import logging
 
 
@@ -64,19 +74,127 @@ def check_time_to_send_morn():
     check_time_to_send_morn()
 
 
-def start_timer_us():
-    sleep(5)
-    check_time_to_send_add()
-    print("Timer usual started")
+# ______________________________________________________________________________________________________________________
+
+def get_gominant_color(images):
+    dominant_colors = []
+    for image in images:
+        colors = colorgram.extract(image, 10)
+
+        rgb_colors = []
+        for color in colors:
+            r = color.rgb.r
+            g = color.rgb.g
+            b = color.rgb.b
+            rgb_colors.append((r, g, b))
+
+        dominant_color = max(set(rgb_colors), key=rgb_colors.count)
+        dominant_colors.append(dominant_color)
+
+    returned = []
+    for i in range(3):
+        cur_color = 0
+        for j in range(len(images)):
+            cur_color += dominant_colors[j][i]
+        returned.append(cur_color // len(images))
+    return returned
 
 
-def start_timer_morn():
-    sleep(5)
-    check_time_to_send_morn()
-    print("Timer morn started")
 
+def resize_guide(image_size, unit_shape, target_ratio):
+    aspect_ratio = Fraction(*image_size).limit_denominator()
+    horizontal = aspect_ratio.numerator
+    vertical = aspect_ratio.denominator
+    target_area = prod(unit_shape) * target_ratio
+    unit_length = (target_area / (horizontal * vertical)) ** .5
+    return int(horizontal * unit_length), int(vertical * unit_length)
+
+
+def make_border(image, value, border=16):
+    return cv2.copyMakeBorder(
+        image,
+        top=border,
+        bottom=border,
+        left=border,
+        right=border,
+        borderType=cv2.BORDER_CONSTANT,
+        value=value
+    )
+
+
+def rotate_image(image, angle, dominant_color):
+    h, w = image.shape[:2]
+    cX, cY = (w // 2, h // 2)
+    M = cv2.getRotationMatrix2D((cX, cY), -angle, 1.0)
+    cos = np.abs(M[0, 0])
+    sin = np.abs(M[0, 1])
+    nW = int((h * sin) + (w * cos))
+    nH = int((h * cos) + (w * sin))
+    M[0, 2] += (nW / 2) - cX
+    M[1, 2] += (nH / 2) - cY
+    return cv2.warpAffine(image, M, (nW, nH), borderMode=cv2.BORDER_CONSTANT, borderValue=dominant_color)  # -!-!-!-!-
+
+
+def make_collage(image_files, output_file,
+                 exponent=0.8, border=16, max_degree=15, unit_shape=(1280, 720),
+                 resize_images=True, image_border=False, rotate_images=True, limit_shape=True):
+    images = [cv2.imread(name) for name in image_files]
+    dominant_color = get_gominant_color(image_files)
+    size_hint = [exponent ** i for i in range(len(images))]
+
+    if resize_images:
+        resized_images = []
+        for image, hint in zip(images, size_hint):
+            height, width = image.shape[:2]
+            guide = resize_guide((width, height), unit_shape, hint)
+            resized = cv2.resize(image, guide, interpolation=cv2.INTER_AREA)
+            if image_border:
+                resized = make_border(resized, (255, 255, 255), border)
+            resized_images.append(resized)
+        images = resized_images
+    else:
+        sorted_images = []
+        for image in sorted(images, key=lambda x: -prod(x.shape[:2])):
+            if image_border:
+                image = make_border(image, (255, 255, 255), border)
+            sorted_images.append(image)
+        images = sorted_images
+
+    sizes = []
+    processed_images = []
+    for image in images:
+        if rotate_images:
+            image = rotate_image(image, random.randrange(-max_degree, max_degree + 1), dominant_color)
+        processed = make_border(image, dominant_color, border)  # -!-!-!-!-
+        processed_images.append(processed)
+        height, width = processed.shape[:2]
+        sizes.append((width, height))
+
+    if limit_shape:
+        max_side = int((sum([w * h for w, h in sizes]) * 2) ** .5)
+        packed = rpack.pack(sizes, max_width=max_side, max_height=max_side)
+    else:
+        packed = rpack.pack(sizes)
+
+    shapes = [(x, y, w, h) for (x, y), (w, h) in zip(packed, sizes)]
+    rightmost = sorted(shapes, key=lambda x: -x[0] - x[2])[0]
+    bound_width = rightmost[0] + rightmost[2]
+    downmost = sorted(shapes, key=lambda x: -x[1] - x[3])[0]
+    bound_height = downmost[1] + downmost[3]
+
+    collage = np.full([bound_height, bound_width, 3], dominant_color, dtype=np.uint8)  # -!-!-!-!-
+
+    for image, (x, y, w, h) in zip(processed_images, shapes):
+        collage[y:y + h, x:x + w] = image
+
+    collage = cv2.GaussianBlur(collage, (3, 3), cv2.BORDER_DEFAULT)
+    cv2.imwrite(output_file, collage)
+
+# ______________________________________________________________________________________________________________________
 
 # __________________________________________ВРЕМЯ УВЕДОМЛЕНИЯ ВЕЧЕРОМ___________________________________________________
+
+
 is_wait_time_add = False
 
 
@@ -186,14 +304,22 @@ def set_time_add_morn(time, userid):
 
 is_wait_day_text = False
 is_wait_day_photos = False
+is_wait_count = False
 
 
 def get_day_text(userid, day_text):
-    global is_wait_day_text, is_wait_day_photos
+    global is_wait_day_text, is_wait_count
     is_wait_day_text = False
-    is_wait_day_photos = True
+    is_wait_count = True
+    bot.send_message(userid, "Сколько фото сегоднешнего дня вы пришлёте?")
+    wait_count(userid, day_text)
 
-    bot.send_message(userid, day_text)
+    # bot.send_message(userid, day_text)
+
+
+def wait_count(userid, day_text):
+    pass
+
 
 
 def get_photos(userid):  # , day_text):
@@ -257,12 +383,13 @@ def text(message):
     elif is_wait_time_morn:
         check_time_add_morn(message.text, message.from_user.id)
         change_wait_time_morn()
+    elif is_wait_count:
+        get_photos(message.from_user.id)
     elif is_wait_day_text:
         day_text = message.text
         get_day_text(message.from_user.id, day_text)
     elif message.text == "id":
         bot.send_message(message.chat.id, "chat id is " + str(message.chat.id))
-    elif message.text == "??":
         bot.send_message(message.from_user.id, "user id is " + str(message.from_user.id))
     elif message.text == "test1":
         bot.send_message(message.chat.id, message.id)
@@ -299,10 +426,6 @@ def handle_photos(message):
     with open(("photos/" + str(message.chat.id) + datetime.date.today().strftime("-%d-%m-%y-") + datetime.datetime.now().strftime('%f') + ".jpg"), mode="wb+") as f:
         f.write(downloaded_file)
 
-
-
-
-
 # @bot.message_handler(content_types=["text"])
 # def text(message):
 #     if message.text == 'photo':
@@ -318,6 +441,18 @@ def handle_photos(message):
 
 # ______________________________________________________________________________________________________________________
 
+
+
+def start_timer_us():
+    sleep(5)
+    check_time_to_send_add()
+    print("Timer usual started")
+
+
+def start_timer_morn():
+    sleep(5)
+    check_time_to_send_morn()
+    print("Timer morn started")
 
 
 def run_bot():
