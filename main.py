@@ -1,16 +1,11 @@
 import os
 import zipfile
-
 import telebot
 import datetime
-#  import urllib.request  # request нужен для загрузки файлов от пользователя
 import sqlite3
 import openai
 from time import sleep
 from multiprocessing import Process
-
-# from PIL import Image
-
 import cv2
 import numpy as np
 import random
@@ -18,7 +13,7 @@ import rpack
 from fractions import Fraction
 from math import prod
 import colorgram
-import logging
+# import logging
 
 
 tg_token = "6203295649:AAGtOD-fl1vXhUGqxIqcp5xbkFjQ35TyGi0"
@@ -296,23 +291,28 @@ is_wait_day_text = False
 is_wait_day_photos = False
 
 
-def get_day_text(userid, inptext):
+def get_day_text(userid):  # , inptext):
     global is_wait_day_text
     uploaded = False
-    if uploaded:
-        return
     for i in range(12):
+        if uploaded:
+            return
         if os.path.isdir("photos/") and datetime.date.today().strftime("%d-%m-%y") \
                 in [i[10:18] for i in os.listdir('photos')]:
             is_wait_day_text = False
-            count = inptext.split("\n")[0]
-            day_text = inptext.split("\n")[1]
-            uploaded = True
+            # /* на будущее
+            # count = inptext.split("\n")[0]
+            # day_text = inptext.split("\n")[1]
+            # */
             files = [f for f in os.listdir("photos/") if (os.path.isfile("photos/" + f)
                                                           and f[:9] == str(userid) and
                                                           f[10:18] == datetime.date.today().strftime("%d-%m-%y"))]
             os.chdir("photos/")
-            make_collage(files, ("collage" + "-" + str(userid) + "-" + datetime.date.today().strftime("%d-%m-%y") + ".jpg"))
+            make_collage(files, ("collage" + "-" + str(userid) + "-" + datetime.date.today().strftime("%d-%m-%y")
+                                 + datetime.datetime.now().strftime('%f') + ".jpg"))
+            print(files)
+            for f in files:
+                print(os.remove(f))
             os.chdir("../")
             bot.send_message(userid, "Загруженно.")
             uploaded = True
@@ -344,27 +344,29 @@ def get_day_text(userid, inptext):
 # ______________________________________________________________________________________________________________________
 def getmagazine(userid):
     try:
-        files = [f for f in os.listdir("photos/") if (os.path.isfile("photos/" + f) and (f[:18] == ("collage" + "-" + str(userid))))]
-        print(str(os.listdir("photos/")), (os.path.isfile("photos/" + os.listdir("photos/")[0]), os.listdir("photos/")[0][:18], (os.listdir("photos/")[0][:18] == ("collage" + "-" + str(userid)))))
-        print(str(files))
-        with zipfile.ZipFile('test.zip', mode='w', compression=zipfile.ZIP_DEFLATED) as zf:
+        files = [f for f in os.listdir("photos/") if (os.path.isfile("photos/" + f)
+                                                      and (f[:17] == ("collage" + "-" + str(userid))))]
+        os.chdir("photos/")
+        cur_archive_name = f'zip-{userid}-{datetime.date.today().strftime("%d-%m-%y")}' \
+                           f'-{datetime.datetime.now().strftime("%f")}.zip'
+        with zipfile.ZipFile(cur_archive_name, mode='w', compression=zipfile.ZIP_DEFLATED) as zf:
             for file in files:
-                print("!" + str(file))
                 add_file = file
-            zf.write(add_file)
-        os.system('file test.zip')
+                zf.write(add_file)
+        os.chdir("../")
+        bot.send_document(userid, cur_archive_name)
     except BaseException:
         pass
-
-
 
 # ______________________________________________________________________________________________________________________
 
 # __________________________________________КОМАНДЫ_____________________________________________________________________
+
+
 @bot.message_handler(commands=['start'])
 def start(message):
-    bot.send_message(message.chat.id, 'Привет, я могу составить архив твоих воспоминаний! Как мной пользоваться можно '
-                                      'узнать, написав мне /help')
+    bot.send_message(message.chat.id, 'Привет, я могу составить архив твоих воспоминаний! Что это такое и как мной '
+                                      'пользоваться можно узнать, написав мне /help')
 
 
 @bot.message_handler(commands=['help'])
@@ -376,7 +378,7 @@ def help(message):
 def settime(message):
     global is_wait_time_add
     bot.send_message(message.chat.id, 'Введите время в которое вам будет удобно получать напоминание о пополнение '
-                                      'архива так: "1720" для получения в 17:20. Для отмены напишите -1 или отмена.')
+                                      'архива так: "1720" для получения в 17:20. Для отмены оповещений напишите -1.')
     is_wait_time_add = True
 
 
@@ -384,7 +386,7 @@ def settime(message):
 def settimemorn(message):
     global is_wait_time_morn
     bot.send_message(message.chat.id, 'Введите время в которое вам будет удобно получать утренний анекдот '
-                                      'так: "1720" для получения в 17:20. Для отмены напишите -1 или отмена.')
+                                      'так: "1720" для получения в 17:20. Для отмены оповещений напишите -1.')
     is_wait_time_morn = True
 
 
@@ -399,19 +401,18 @@ def getmagazine_command(message):
 @bot.message_handler(commands=['upload'])
 def upload(message):
     global is_wait_day_text
-    bot.send_message(message.chat.id, "Отправьте до 3 фото. Затем введите количество загружаемых вами фото, а на следующей строке опишите "
-                                      "свой день в паре слов. После напишите /complite")
+    bot.send_message(message.chat.id, "Отправьте парочку фото своего дня. Затем введите количество загружаемых вами фото, а на следующей строке опишите "
+                                      "свой день в паре слов.")
     is_wait_day_text = True
 
 
-# @bot.message_handler(commands=['complite'])
-# def complite(message):
-#     get_day_text()
 
 
 # ______________________________________________________________________________________________________________________
 
 # __________________________________________ОБРАБОТКА ТЕКСТА____________________________________________________________
+
+
 
 @bot.message_handler(content_types=["text"])
 def text(message):
@@ -424,8 +425,7 @@ def text(message):
     # elif is_wait_count:
     #     get_photos(message.from_user.id)
     elif is_wait_day_text:
-        day_text = message.text
-        get_day_text(message.from_user.id, day_text)
+        get_day_text(message.from_user.id)  # , message.text)
     elif message.text == "id":
         bot.send_message(message.chat.id, "chat id is " + str(message.chat.id))
         bot.send_message(message.from_user.id, "user id is " + str(message.from_user.id))
@@ -461,7 +461,7 @@ def handle_photos(message):
     file_id = last_photo.file_id
     file_info = bot.get_file(file_id)
     downloaded_file = bot.download_file(file_info.file_path)
-    bot.send_photo(message.chat.id, downloaded_file)
+    # bot.send_photo(message.chat.id, downloaded_file)
     os.chdir("photos")
     with open((str(message.chat.id) + datetime.date.today().strftime("-%d-%m-%y-") + datetime.datetime.now().strftime('%f') + ".jpg"), mode="wb+") as f:
         f.write(downloaded_file)
