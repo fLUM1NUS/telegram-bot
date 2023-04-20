@@ -29,9 +29,6 @@ HELP_TEXT = '''
 Получить свой архив воспоминаний можно командой /getmagazine
 '''
 
-example_magazine = {"userId1": [["day1text", "day1photo1", "day1photo2", "day1photo3"], ["day2text", "day2photo1", "day2photo2", "day2photo3"]]}  # , "userId2": ["messageId1", "messageId2"]}
-"userId1:day1Text/day1photo1/day1Photo2*day2Text/day2photo1;userId2"
-
 
 def get_chatgpt_joke():
     return openai.ChatCompletion.create(
@@ -291,7 +288,7 @@ is_wait_day_text = False
 is_wait_day_photos = False
 
 
-def get_day_text(userid):  # , inptext):
+def get_day_text(userid):
     global is_wait_day_text
     uploaded = False
     for i in range(12):
@@ -300,10 +297,6 @@ def get_day_text(userid):  # , inptext):
         if os.path.isdir("photos/") and datetime.date.today().strftime("%d-%m-%y") \
                 in [i[10:18] for i in os.listdir('photos')]:
             is_wait_day_text = False
-            # /* на будущее
-            # count = inptext.split("\n")[0]
-            # day_text = inptext.split("\n")[1]
-            # */
             files = [f for f in os.listdir("photos/") if (os.path.isfile("photos/" + f)
                                                           and f[:9] == str(userid) and
                                                           f[10:18] == datetime.date.today().strftime("%d-%m-%y"))]
@@ -321,27 +314,11 @@ def get_day_text(userid):  # , inptext):
     if not uploaded:
         bot.send_message(userid, "Не загруженно. Воспользуйтесь /upload снова")
 
-    # bot.send_message(userid, "Сколько фото сегоднешнего дня вы пришлёте?")
-    # wait_count(userid, day_text)
+# ______________________________________________________________________________________________________________________
 
-    # bot.send_message(userid, day_text)
-
-
-# def wait_count(userid, day_text):
-#     pass
-#
-# # if os.path.isdir("photo/" + str(userid)):
-# #     days = os.listdir('photos')
-# #     for day in days:
-# #         pass
-#
-#
-# def get_photos(message, userid, count, day_text):
-#     global is_wait_day_photos
-#     is_wait_day_photos = False
 
 # ______________________________________________________________________________________________________________________
-# ______________________________________________________________________________________________________________________
+
 def getmagazine(userid):
     try:
         files = [f for f in os.listdir("photos/") if (os.path.isfile("photos/" + f)
@@ -353,8 +330,9 @@ def getmagazine(userid):
             for file in files:
                 add_file = file
                 zf.write(add_file)
+        bot.send_document(userid, open(cur_archive_name, "rb"),
+                          visible_file_name=f'Collage {datetime.date.today().strftime("%d %m %y")}.zip')
         os.chdir("../")
-        bot.send_document(userid, cur_archive_name)
     except BaseException:
         pass
 
@@ -406,6 +384,9 @@ def upload(message):
     is_wait_day_text = True
 
 
+@bot.message_handler(commands=['joke'])
+def joke(message):
+    bot.send_message(message.chat.id, str(get_chatgpt_joke()))
 
 
 # ______________________________________________________________________________________________________________________
@@ -416,42 +397,18 @@ def upload(message):
 
 @bot.message_handler(content_types=["text"])
 def text(message):
-    if is_wait_time_add:  # ожидается установка времени
+    if is_wait_time_add:
         check_time_add(message.text, message.from_user.id)
         change_wait_time_add()
     elif is_wait_time_morn:
         check_time_add_morn(message.text, message.from_user.id)
         change_wait_time_morn()
-    # elif is_wait_count:
-    #     get_photos(message.from_user.id)
     elif is_wait_day_text:
-        get_day_text(message.from_user.id)  # , message.text)
+        get_day_text(message.from_user.id)
     elif message.text == "id":
-        bot.send_message(message.chat.id, "chat id is " + str(message.chat.id))
         bot.send_message(message.from_user.id, "user id is " + str(message.from_user.id))
-    elif message.text == "test1":
-        # make_collage(["i1.jpg", "i2.jpg", "i3.jpg"], "OUT2.jpg")
-        getmagazine(message.from_user.id)
-        bot.send_message(message.chat.id, message.id)
 
 
-# @bot.message_handler(content_types=['photo'])
-# def handle_photos(message):
-#     global is_wait_day_photos
-#     if is_wait_day_photos:
-#         chat_id = message.chat.id
-#         photos = message.photo
-#         print(photos, "\n", "class:", "\n", type(photos), photos[0], "\n", "len:", len(photos))
-#         num_photos = len(photos)
-#         print(f"Received {num_photos} photo(s) from user {chat_id}")
-#         # for i in range(num_photos):
-#         #     bot.send_photo(chat_id, photos[i].file_id)
-#         bot.reply_to(message, f"Received {num_photos} photo(s)")
-#         get_photos(message.from_user.id)
-#
-#         # for photo in message.photo:
-#         #     file_id = photo.file_id
-#         #     bot.send_photo(message.chat.id, file_id)
 
 @bot.message_handler(content_types=['photo'])
 def handle_photos(message):
@@ -461,24 +418,10 @@ def handle_photos(message):
     file_id = last_photo.file_id
     file_info = bot.get_file(file_id)
     downloaded_file = bot.download_file(file_info.file_path)
-    # bot.send_photo(message.chat.id, downloaded_file)
     os.chdir("photos")
     with open((str(message.chat.id) + datetime.date.today().strftime("-%d-%m-%y-") + datetime.datetime.now().strftime('%f') + ".jpg"), mode="wb+") as f:
         f.write(downloaded_file)
     os.chdir("../")
-
-# @bot.message_handler(content_types=["text"])
-# def text(message):
-#     if message.text == 'photo':
-#         file = open('photo.png', 'rb')
-#         bot.send_photo(message.chat.id, file)
-#
-#
-# @bot.message_handler(content_types=["text"])
-# def text(message):
-#     if message.text == 'document':
-#         file = open('file.txt', 'rb')
-#         bot.send_document(message.chat.id, file)
 
 # ______________________________________________________________________________________________________________________
 
@@ -509,5 +452,3 @@ if __name__ == "__main__":
     bot.send_message("901913162", "!!!")
     print("Process started")
 
-
-print()
