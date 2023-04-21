@@ -19,7 +19,7 @@ import colorgram
 tg_token = "6203295649:AAGtOD-fl1vXhUGqxIqcp5xbkFjQ35TyGi0"
 bot = telebot.TeleBot(tg_token)
 
-openai.api_key = "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"
+openai.api_key = "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"
 
 ARCHIVE_BOT_ID = "6286742171"
 HELP_TEXT = '''
